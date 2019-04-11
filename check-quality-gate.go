@@ -110,7 +110,7 @@ func main() {
 	// query sonar analysisid to discover if quality gate passed or failed
 	gateStatus := getAnalysis(sonarToken, sonarAnalysisUrl)
 	if gateStatus == "ERROR" {
-		log.Fatal("Quality gate FAILED with ", gateStatus, " dashboard available here:", dashboardUrl)
+		log.Fatal("Quality gate FAILED with ", gateStatus, " dashboard available here: ", dashboardUrl)
 	} else {
 		fmt.Println("Quality gate PASSED with", gateStatus, "dashboard available here:", dashboardUrl)
 	}
