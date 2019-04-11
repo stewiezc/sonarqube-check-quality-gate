@@ -1,13 +1,39 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 
 	"gopkg.in/ini.v1"
 )
+
+type TaskResponse struct {
+	Task struct {
+		ID                 string        `json:"id"`
+		Type               string        `json:"type"`
+		ComponentID        string        `json:"componentId"`
+		ComponentKey       string        `json:"componentKey"`
+		ComponentName      string        `json:"componentName"`
+		ComponentQualifier string        `json:"componentQualifier"`
+		AnalysisID         string        `json:"analysisId"`
+		Status             string        `json:"status"`
+		SubmittedAt        string        `json:"submittedAt"`
+		SubmitterLogin     string        `json:"submitterLogin"`
+		StartedAt          string        `json:"startedAt"`
+		ExecutedAt         string        `json:"executedAt"`
+		ExecutionTimeMs    int           `json:"executionTimeMs"`
+		Logs               bool          `json:"logs"`
+		HasScannerContext  bool          `json:"hasScannerContext"`
+		Organization       string        `json:"organization"`
+		WarningCount       int           `json:"warningCount"`
+		Warnings           []interface{} `json:"warnings"`
+	} `json:"task"`
+}
 
 func main() {
 	// pull in environment variables
@@ -32,6 +58,7 @@ func main() {
 	serverVersion := sonardata.Section("").Key("serverVersion").String()
 	dashboardUrl := sonardata.Section("").Key("dashboardUrl").String()
 	ceTaskId := sonardata.Section("").Key("ceTaskId").String()
+	ceTaskUrl := sonardata.Section("").Key("ceTaskUrl").String()
 
 	sonarAnalysisUrl := serverUrl + "/api/qualitygates/project_status?analysisId="
 
@@ -49,9 +76,17 @@ func main() {
 		fmt.Println("serverVersion:", serverVersion)
 		fmt.Println("dashboardUrl:", dashboardUrl)
 		fmt.Println("ceTaskId:", ceTaskId)
+		fmt.Println("ceTaskUrl:", ceTaskUrl)
 	}
 
-	// discover sonar info from report-task.txt file (ini)
+	// query sonar task to discover the analysis id
+	analysisid := getTask(sonarToken, ceTaskUrl)
+
+	if *debug == true {
+		fmt.Println("analysisId:", analysisid)
+	}
+
+	// query sonar analysisid to discover if quality gate passed or failed
 
 }
 
@@ -60,4 +95,42 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func getTask(sonarToken string, ceTaskUrl string) string {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", ceTaskUrl, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	req.SetBasicAuth(sonarToken, "")
+
+	var analysisid string
+	for done := false; !done; {
+		resp, getErr := client.Do(req)
+		if getErr != nil {
+			log.Fatal(err)
+		}
+
+		body, readErr := ioutil.ReadAll(resp.Body)
+		if readErr != nil {
+			log.Fatal(readErr)
+		}
+
+		var taskresponse TaskResponse
+		jsonErr := json.Unmarshal(body, &taskresponse)
+		if jsonErr != nil {
+			log.Fatal(jsonErr)
+		}
+
+		taskStatus := taskresponse.Task.Status
+		if taskStatus == "SUCCESS" {
+			analysisid = taskresponse.Task.AnalysisID
+			done = true
+		} else if taskStatus == "FAILED" {
+			log.Fatal("task has failed")
+		}
+	}
+
+	return analysisid
 }
