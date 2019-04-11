@@ -35,10 +35,32 @@ type TaskResponse struct {
 	} `json:"task"`
 }
 
+type AnalysisResponse struct {
+	ProjectStatus struct {
+		Status     string `json:"status"`
+		Conditions []struct {
+			Status         string `json:"status"`
+			MetricKey      string `json:"metricKey"`
+			Comparator     string `json:"comparator"`
+			PeriodIndex    int    `json:"periodIndex"`
+			ErrorThreshold string `json:"errorThreshold"`
+			ActualValue    string `json:"actualValue"`
+		} `json:"conditions"`
+		Periods []struct {
+			Index     int    `json:"index"`
+			Mode      string `json:"mode"`
+			Date      string `json:"date"`
+			Parameter string `json:"parameter"`
+		} `json:"periods"`
+		IgnoredConditions bool `json:"ignoredConditions"`
+	} `json:"projectStatus"`
+}
+
 func main() {
 	// pull in environment variables
 	sonarToken := getEnv("SONAR_TOKEN", "")
 	ciProjectDir := getEnv("CI_PROJECT_DIR", "/tmp/app")
+
 	reportTaskPath := ciProjectDir + "/.scannerwork/report-task.txt"
 
 	// pull in variables from report-task.txt
@@ -60,14 +82,11 @@ func main() {
 	ceTaskId := sonardata.Section("").Key("ceTaskId").String()
 	ceTaskUrl := sonardata.Section("").Key("ceTaskUrl").String()
 
-	sonarAnalysisUrl := serverUrl + "/api/qualitygates/project_status?analysisId="
-
 	// print out some info if debug
 	debug := flag.Bool("d", false, "some debug output")
 	flag.Parse()
 	if *debug == true {
 		fmt.Println("sonarToken:", sonarToken)
-		fmt.Println("sonarAnalysisUrl:", sonarAnalysisUrl)
 		fmt.Println("ciProjectDir:", ciProjectDir)
 		fmt.Println("reportTaskPath:", reportTaskPath)
 		fmt.Println("organization:", organization)
@@ -81,13 +100,20 @@ func main() {
 
 	// query sonar task to discover the analysis id
 	analysisid := getTask(sonarToken, ceTaskUrl)
+	sonarAnalysisUrl := serverUrl + "/api/qualitygates/project_status?analysisId=" + analysisid
 
 	if *debug == true {
 		fmt.Println("analysisId:", analysisid)
+		fmt.Println("sonarAnalysisUrl:", sonarAnalysisUrl)
 	}
 
 	// query sonar analysisid to discover if quality gate passed or failed
-
+	gateStatus := getAnalysis(sonarToken, sonarAnalysisUrl)
+	if gateStatus == "ERROR" {
+		log.Fatal("Quality gate FAILED with ", gateStatus, " dashboard available here:", dashboardUrl)
+	} else {
+		fmt.Println("Quality gate PASSED with", gateStatus, "dashboard available here:", dashboardUrl)
+	}
 }
 
 func getEnv(key, fallback string) string {
@@ -133,4 +159,32 @@ func getTask(sonarToken string, ceTaskUrl string) string {
 	}
 
 	return analysisid
+}
+
+func getAnalysis(sonarToken string, analysisUrl string) string {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", analysisUrl, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	req.SetBasicAuth(sonarToken, "")
+
+	resp, getErr := client.Do(req)
+	if getErr != nil {
+		log.Fatal(getErr)
+	}
+
+	body, readErr := ioutil.ReadAll(resp.Body)
+	if readErr != nil {
+		log.Fatal(readErr)
+	}
+
+	var analysisresponse AnalysisResponse
+	jsonErr := json.Unmarshal(body, &analysisresponse)
+	if jsonErr != nil {
+		log.Fatal(jsonErr)
+	}
+
+	gateStatus := analysisresponse.ProjectStatus.Status
+	return gateStatus
 }
